@@ -1,0 +1,169 @@
+---
+title: "2024 UK General Election Turnout Analysis"
+description: |
+  Investigating voter participation patterns
+author:
+  - name: Sumer Gupta
+    affiliation: University of Essex
+date: "2026-02-19"
+output:
+  distill::distill_article:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  fig.retina = 2,
+  fig.align = 'center'
+  )
+```
+
+```{r load-packages, message = FALSE}
+library(stringr)
+library(readr)
+library(ggplot2)
+library(curl)
+library(tidyverse)
+```
+
+## Introduction
+
+This project aims to study the UK 2024 General Election, specifically, it investigates the low turnout across the constituencies of the UK. It uses a [data-set](https://electionresults.parliament.uk/general-elections/6/candidacies.csv) obtained from the UK parliament.
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #FD5D5D;"}
+## 1. Cleaning the Data-set
+
+```{r}
+uk_csv <- "https://electionresults.parliament.uk/general-elections/6/candidacies.csv"
+uk_raw <- readr::read_csv(uk_csv, show_col_types = FALSE)
+names(uk_raw) <- names(uk_raw) %>% tolower() %>% str_replace_all("\\s+", "_")
+
+# By-elections are filtered out so that only general election constituencies remain in the data.
+
+uk1 <- uk_raw %>% 
+  filter(!`election_is_by-election`) 
+
+# Selected columns are renamed for clarity and stored into uk2
+
+uk2 <- uk1 %>%
+  select(
+    constituency = constituency_name,
+    country = country_name,
+    valid_votes = candidate_vote_count,
+    electorate = electorate
+  )
+
+# Group the data by country and constituency
+
+uk3 <- uk2 %>%
+  group_by(country, constituency) %>%
+  summarise(
+    valid_votes = sum(valid_votes, na.rm = TRUE),
+    electorate = max(electorate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Calculate turnout and filter out invalid votes
+
+uk <- uk3 %>%
+  mutate(turnout_registered = 100 * valid_votes / electorate) %>%
+  filter(is.finite(turnout_registered), electorate > 0)
+
+```
+
+This code processes the official data, it takes the raw data-set and standardizes the column names for easier manipulation. After filtering out by-elections to focus exclusively on general election results, the script aggregates candidate-level data to determine the total valid votes and maximum electorate for each constituency. Then, it calculates the voter turnout as a percentage of the registered electorate; transforming granular candidate information into a high-level geographical summary. Finally, data integrity is maintained by removing entries with invalid/empty entries to maintain a clean data-set that is ready for comparative analysis
+:::
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #FD3030;"}
+## 2. Visualization (A): Mean Turnout and Distribution by Country
+
+```{r}
+# Calculate the standard error (se) and confidence intervals (ci)
+turnout_by_country_ci <- uk %>%
+  group_by(country) %>%
+  summarise(mean_turnout = mean(turnout_registered, na.rm = TRUE),
+            median_turnout = median(turnout_registered, 
+                                    na.rm = TRUE),
+            sd_turnout = sd(turnout_registered, na.rm = TRUE),
+            n = n(),
+            .groups = "drop") %>% 
+  # summarises the mean and median turnout, standard deviation and sample size for each
+  mutate(
+    se = sd_turnout / sqrt(n),
+    ci_lower = mean_turnout - 1.96 * se,
+    ci_upper = mean_turnout + 1.96 * se
+    ) #modifies the columns in the existing dataset (SE, CI bounds)
+
+
+# Create the visualisation using ggplot2
+# The first layer - a violin plot showing the full distribution 
+ggplot(uk, aes(country, turnout_registered)) +
+  geom_violin(fill = "#4884a5", alpha = 0.6, trim = FALSE, width = 1.2) +
+# The second layer - the bar chart of mean turnout
+  geom_col(data = turnout_by_country_ci, aes(y = mean_turnout), 
+           width = 0.7, fill = "#0072B2", alpha = 0.8) +
+# The third layer - error bars showing the confidence intervals 
+  geom_errorbar(data = turnout_by_country_ci, 
+                aes(y = mean_turnout, 
+                    ymin = ci_lower, ymax = ci_upper),
+                width = 0.2, size = 0.8) +
+  scale_y_continuous(name = "Turnout (%)",
+                     limits = c(0,90),
+                     expand = expansion(mult = c(0, 0.05))
+                     ) +
+  labs(
+    title = "UK 2024 General Election: Mean Turnout and Distribution by Country",
+    x = "Country",
+caption = "Violin plots show the full distribution of constituency turnouts; bars and errorbars show the mean and its 95% CI"
+  )
+```
+
+This graph shows that the UK has the highest mean turnout across the four nations of the UK during the 2024 General Election. The bar heights represent the average turnout for each country, while the overlaid violin plots show the density and spread of the turnout across individual constituencies. In England, most constituencies are around the average but in Scotland and Wales, there are a significant number of constituencies that have below-average voter turnout. The error bars indicate the 95% confidence intervals for the mean turnout, showing that the estimates made are statistically robust.
+:::
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #740101;"}
+## 3. Visualization (B): Differences in Constituency Sizes across Nations of the UK
+
+```{r}
+# Calculate the overall mean turnout for all of UK
+overall_mean <- mean(uk$valid_votes)
+
+# Create the visualisation using ggplot2
+# The first layer - the density plot
+ggplot(uk, aes(x = valid_votes)) +
+  geom_density(aes(fill=country), alpha = 0.67) +
+  # The second layer - vertical line showing the overall mean
+  geom_vline(xintercept = overall_mean,
+             color = "red", linetype = "dashed", linewidth = 1) +
+  # Separate the plots by country
+  facet_wrap(~ country, scales = "free_y") +
+  scale_fill_brewer(palette = "Set2", guide = "none") +
+  labs(
+    title = "How do Constituency Sizes Differ Across the Nations of the UK",
+    subtitle = "A comparison of the number of voters in each constituency \nacross England, Scotland, Wales and Northern Ireland",
+    y = "Number of Valid Votes per Constituency",
+    x = "Density (How Common Each Size Is)"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+This graph shows that Northern-Ireland has the most equal-sized constituencies, as the base of the curve covers the shortest range on the x-axis (narrowest spread) - roughly 30,000 to 55,000 valid votes. Whereas, Scotland has the most unequal-sized constituencies, as the base of the curve is widest with a gradual tail that extends below 20,000 valid voters on the x-axis.
+
+Such a density plot automatically normalizes the distribution, such that the area under each curve sums to 1, regardless of the number of constituencies within each country. The `geom_density()` function uses the underlying computation of a kernel density estimator, which assumes that the underlying distribution in the data is unbounded, smooth and continuous. Such a visualization can handle the larger sample size, as it automatically uses the number of observations to estimate the curve. It is also good at visualizing the spread as it has a single visual measure, so inequality can be inferred from looking at the width of the curve at its base.
+:::
