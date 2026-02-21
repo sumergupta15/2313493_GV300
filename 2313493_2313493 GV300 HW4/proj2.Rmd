@@ -1,0 +1,222 @@
+---
+title: "A/B Testing in Political Communications"
+description: |
+  Estimating causal effects from digital experiments
+author:
+  - name: Sumer Gupta
+    affiliation: University of Essex
+date: "2026-02-19"
+output:
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  fig.retina = 2,
+  fig.align = 'center'
+  )
+```
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+```
+
+## Introduction
+
+This project simulates a randomized controlled trial (RCT) to determine which type of digital messaging, such as a website homepage with broad policy platforms or one with an issue-focused platform, can be most effective in engaging with supporters. By randomly assigning website visitors to different versions of a homepage, the experiment isolates the causal effect of specific strategies on supporter sign-ups.
+
+### Theoretical Framework
+
+Every visitor has **two potential outcomes**, only one of which we observe:
+
+(1) `Y0`: potential of visitor signing up after being shown the standard (control) homepage
+
+(2) `Y1`: potential of a visitor signing up after being shown the issue-focused (treatment) homepage.
+
+According to the **fundamental problem of causal inference**, we can never observe both `Y0` and `Y1` for same person, if we show them the treatment homepage, we would never know what would've happened under the control homepage, and vice-versa.
+
+Through a RCT, we can estimate the **Average Treatment Effect (ATE)**:
+
+$$\text{ATE} = E[Y_1 - Y_0] = E[Y_1] - E[Y_0]$$
+
+Because of the average treatment effect, the treatment and control groups are statistically equivalent. The difference in outcomes can then be attributed to treatment, so `E[Y1]` can be estimated from the treatment group and `E[Y0]` from the control group.
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #FD5D5D;"}
+## 1. Simulating the Experiment
+
+Experiment setup:
+
+-   **Sample size:** 1,500 website visitors
+
+-   **Assignment**: Random (There's a 50% probability a visitor will get either homepage)
+
+-   **Control condition**: Standard homepage with broad policy platforms
+
+-   **Treatment condition**: Issue-focused homepage
+
+-   **Outcome variable**: Supporter sign-up (binary indicator; 1 = yes, 0 = no)
+
+-   **Control sign-up rate**: 12% (expected)
+
+-   **Treatment sign-up rate**: 17% (expected)
+
+There's a reason to why this experiment is simulated, real A/B tests would require actual website traffic, ethics approval, informed consent considerations and longer observation periods. A simulation allows us to control the true treatment effect, demonstrate statistical concepts more clearly, explore the heterogeneity systematically and avoid the practical difficulties of a real A/B test.
+
+```{r}
+set.seed(123) # This ensures replicabiltiy 
+n <- 1500 # Total visitors to the site
+
+# Random treatment assessment
+treatment <- rbinom(n = n, size = 1, prob = 0.5) 
+# rbinom() generates random deviates from a binomial distribution, this is what allows us to simulate our A/B test. 
+
+# Potential outcomes for each visitor
+p_control <- 0.12 # 12% control sign-up rate
+p_treated <- 0.17 # 17% treatment sign-up rate
+
+Y0 <- rbinom(n = n, size = 1, prob = p_control)
+Y1 <- rbinom(n = n, size = 1, prob = p_treated)
+
+# Realized outcome - single results actually observed for each visitor, 
+support_signup <- ifelse(treatment == 1, Y1, Y0)
+
+# Create a data frame
+party_ab <- data.frame(
+  visitor_id = 1:n,
+  treatment = treatment,
+  support_signup = support_signup
+)
+```
+:::
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #FD3030;"}
+## 2. Calculate the Average Treatment Effect (ATE)
+
+We can model a logistic regression to determine how being in the treatment group affects a visitor's sign-up probability using `glm()`.
+
+```{r}
+logit_model <- glm(support_signup ~ treatment, data = party_ab, family = binomial(link = "logit"))
+
+summary(logit_model)
+```
+
+The coefficients of a logistic regression must be carefully interpreted as they're expressed in the scale of log-odds scale, not in the traditional, 0-to-1, scale. So the treatment coefficient of 0.47 is the log-probability of signing up increasing by 0.47 when moving from control to treatment.
+
+```{r}
+
+p_hat_control <- predict(
+  logit_model, 
+  newdata = data.frame(treatment = 0),
+  type = "response"
+)
+
+# p_hat_control is the predicted probability of the logistic regression model that a specific visitor will sign-up if shown standard homepage 
+
+p_hat_treated <-predict(
+  logit_model, 
+  newdata = data.frame(treatment = 1),
+  type = "response"
+)
+
+# p_hat_treated is the predicted probability of the logistic regression model that a specific visitor will sign-up if shown the issue-focused homepage. 
+
+# Given p_hat_control and p_hat_treated, we can calculate the ATE:
+
+ate_logit <- p_hat_treated - p_hat_control
+
+ate_logit
+
+```
+
+The logistic regression model shows that the value of the ATE is 0.0535 which is 5.35 percentage points, the difference between the percentage of people that signed up after observing the control and treatment homepages.
+:::
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #740101;"}
+## 3. Visualization: Treatment Effect by Age
+
+```{r}
+set.seed(2024) 
+
+# Simulate visitor ages using a normal distribution, limit them between 18 and 75 to refect a realistic electorate
+party_ab$age <- round(pmin(pmax(rnorm(nrow(party_ab), mean = 40, sd = 12), 18), 75))
+
+# Use a binomial distribution to randomly assign a "high interest" trait to 40% of the visitors 
+party_ab$high_interest <- rbinom(nrow(party_ab), size = 1, prob = 0.4)
+
+# Verify that the new data was added correctly
+head(party_ab[, c("visitor_id", "treatment", "support_signup", "age", "high_interest")])
+
+# To examine age-related heterogeneity, create a new linear model using lm()
+lm_het_age <- lm(support_signup ~ treatment  * age, data = party_ab)
+
+lm_het_age
+```
+
+The interaction coefficient is 0.001236 which shows how the treatment affects change for each year of age. So for each additional year of age, the treatment affect increases by 0.1236, which means that an issue-focused homepage is marginally more effective for those visitors who are older.
+
+```{r}
+# Create a sequence of ages from 18 to 75.
+age_seq <- seq(18,75, by = 1)
+
+# Create a new sequence for displaying larger intervals
+major_age <- seq(20,75, by = 15) 
+
+# Extract coefficients from lm_het_age
+treat <- coef(lm_het_age)["treatment"]
+inter <- coef(lm_het_age)["treatment:age"]
+
+# Create a data frame for the plot
+marginal_effect_data <- data.frame(
+  age = age_seq,
+  treatment_effect = treat + (inter * age_seq)
+)
+
+# Filter the dataset to include only the rows where the visitor's age matches the 15-year intervals
+interval_data <- subset(marginal_effect_data, age %in% major_age)
+
+# Plot the marginal effect of age on treatment
+ggplot(marginal_effect_data, aes(x = age, y = treatment_effect)) +
+  geom_line(colour = "#F45D0B", linewidth = 1.2) +
+  geom_segment(data = interval_data,
+               aes(x = 18, xend = age,
+                   y = treatment_effect, yend = treatment_effect),
+               linetype = "dashed", colour = "#C84C09") +
+  geom_point(data = interval_data, 
+             colour = "#F45D0B", 
+             size = 2.5) +
+  scale_x_continuous(breaks = major_age,
+                     minor_breaks = seq(15,75, by = 5),
+                     limits = c(18,75),
+                     expand = expansion(mult = c(0,0.01))
+                     ) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.1),
+                     breaks = seq (0, 0.1, by = 0.01)) +
+  labs(
+    title = "The Effect of Issue-Focused Homepage by Age",
+    subtitle = "Signup probability increases as visitors get older",
+    x = "Visitor Age",
+    y = "Treatment Effect (Percentage Point Increase)"
+) +
+  theme(panel.grid.major = element_line(colour = "#DCDCDC" ),
+        panel.grid.minor = element_line(colour = "#DCDCDC")
+) +
+  theme_light()
+```
+
+This plot shows that the effectiveness of the issue-focused homepage increases with visitor age. The upward-sloping line highlights a positive relation between visitor age and treatment effect, so older visitors are much more likely to influenced by issue-focused messaging than younger ones.
+:::
