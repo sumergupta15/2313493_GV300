@@ -86,7 +86,15 @@ This project applied quantitative text analysis to the US Presidential Inaugural
 1.  ***Corpus Construction***: Built and annotated a corpus of 40 inaugural addresses using the built-in `quanteda` dataset, then reshaped the raw text into paragraph-level observations, increased the data points to enable a more granular statistical classification.
 2.  ***Text Processing***: Applied a rigorous reprocessing pipeline that involved tokenisation, stemming and stopward removal to convert raw prose into a structured Document-Feature Matrix (DFM) that is ready for analysis.
 3.  ***Keyness Analysis***: Identified the specific "marker words" that define partisan rhetoric using chi-squared keyness statistics which allowed for a data-driven comparison of the vocabulary most closely associated with Democrat versus Republican inaugural addresses.
-4.   ***Supervised Classification***: Trained a multinomial Naïve Bayes classifier, with Laplace smoothing, so that the categorisation of political text is automated. The predicted accuracy of the model is evaluated using industry-standard metrics, this include precision, recall and F1-score, on a test set.
+4.  ***Supervised Classification***: Trained a multinomial Naïve Bayes classifier, with Laplace smoothing, so that the categorisation of political text is automated. The predicted accuracy of the model is evaluated using industry-standard metrics, this include precision, recall and F1-score, on a test set.
+
+**Key Insights:**
+
+1.  ***Predictive Asymmetry***: While the model had higher precision for Republican labels, it showed better recall for democratic paragraphs. This suggests that while certain Republican markers are more distinct, the model captured a broader and less precise share of the Democrat rhetoric.
+2.  ***Subtle Patterns***: Even though keyness analysis showed distinct partisan vocabularies, these patterns proved to be too subtle for classification at the paragraph level.
+3.  ***Predictive Power***: The classifier achieved an accuracy of 58.3% which was only marginally better than the 55.7% "No Information Rate". The p-value of 0.19 suggests that the model cannot reliably outperform a baseline guess on the basis of the most frequent party.
+
+[View Project →](proj3.html)
 
 ------------------------------------------------------------------------
 

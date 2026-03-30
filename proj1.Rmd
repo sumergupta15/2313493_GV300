@@ -42,8 +42,7 @@ This project aims to study the UK 2024 General Election, specifically, it invest
 ## 1. Cleaning the Data-set
 
 ```{r}
-uk_csv <- "https://electionresults.parliament.uk/general-elections/6/candidacies.csv"
-uk_raw <- readr::read_csv(uk_csv, show_col_types = FALSE)
+uk_raw <- read_csv("data/uk_data.csv", show_col_types = FALSE)
 names(uk_raw) <- names(uk_raw) %>% tolower() %>% str_replace_all("\\s+", "_")
 
 # By-elections are filtered out so that only general election constituencies remain in the data.
