@@ -1,0 +1,393 @@
+---
+title: "Text Analysis of Inaugural Addresses"
+description: |
+  Classifying partisan language patterns in political rhetoric using Naïve Bayes
+author:
+  - name: Sumer Gupta
+    affiliation: University of Essex
+date: "2026-03-29"
+output:
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  fig.retina = 2,
+  fig.align = 'center'
+  )
+```
+
+```{r load-packages}
+library(quanteda)
+library(quanteda.textmodels)
+library(quanteda.textstats)
+library(ggplot2)
+library(tidyverse)
+library(caret)
+```
+
+## Introduction
+
+A politician's partisan identity doesn't just shape what the politician would say, but also shapes how they say it - the vocabulary, tone and rhetoric employed. The US presidential inaugural address offers fertile ground for testing this claim as they are one of the most formally preserved political texts. By training a supervised machine learning classifier to correctly identify the party affiliation of a US president purely from the linguistic features of their inaugural address.
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #2166AC;"}
+## 1. Building and Exploring the Corpus
+
+The dataset `data_corpus_inaugural` is directly built into the `quanteda` package, containing 59 inaugural addressess from the time of Washington (1789) to Biden (2021). However, since the modern two-party system solidified after 1860, we can create a subset from 1861 onwards - after which point the two-party competition between Republican and Democrat goes on until the present.
+
+```{r build-corpus}
+
+#Load the built-in dataset
+
+data("data_corpus_inaugural", package = "quanteda")
+
+# Create a subset for the two-party era
+
+modern_corpus <- data_corpus_inaugural[
+  docvars(data_corpus_inaugural, "Year") >= 1861 & 
+  docvars(data_corpus_inaugural, "Year") <= 2021
+]
+
+# Assign party labels using historical records.
+
+years <- docvars(modern_corpus, "Year")
+
+
+parties <- case_when(
+  years %in% c(1861, 1865, 1869, 1873, 1877, 1881, 1889, 1897,
+               1901, 1905, 1909, 1921, 1925, 1929, 1953, 1957,
+               1969, 1973, 1981, 1985, 1989, 2001, 2005, 2017) ~ "Republican",
+  years %in% c(1885, 1893, 1913, 1917, 1933, 1937, 1941, 1945,
+               1949, 1961, 1965, 1977, 1993, 1997, 2009, 2013, 2021) ~ "Democrat"
+)
+
+docvars(modern_corpus, "Party") <- parties # docvars() attach party labels back to the corpus providing a digital tag of political affiliation. 
+
+# Create a summary  of the Corpus
+
+summary(modern_corpus)[, c("Text", "Types", "Tokens", "Sentences",
+                            "Year", "President", "Party")]
+```
+
+The resulting corpus contains speeches, comprising of both Democrat and Republican addresses. Even though the count is slightly higher for the Republican party, the distribution is balanced enough to give a stable foundation for the model. This balance ensures that the classifier would not simply "default" to the most frequent party, enabling the statistical differences in vocabulary to drive the predictions.
+
+```{r plot-corpus}
+
+# Create a data frame for the plot
+
+token_df <- data.frame(
+  year = docvars(modern_corpus, "Year"),
+  tokens = ntoken(modern_corpus),
+  party = docvars(modern_corpus, "Party"),
+  president = docvars(modern_corpus, "President")
+)
+
+# Plot the number of tokens (individual units of text)
+
+ggplot(token_df, aes(x = year, y = tokens, colour = party)) +
+  geom_line(colour = "grey80", linewidth = 0.5, aes(group = 1)) +
+  geom_point(size = 3, alpha = 0.9) +
+  scale_colour_manual(values = c("Democrat" = "#2166AC", "Republican" = "#D6604D")) +
+  geom_smooth(method = "lm", aes(group = 1), colour = "#7A2894", linetype = "dashed", se = FALSE) +
+  scale_x_continuous(breaks = seq(1860, 2025, by = 20)) +
+  labs(
+    title    = "Length of US Presidential Inaugural Addresses Over Time",
+    subtitle = "This plot shows that the length of inaugural \nspeeches have gotten shorter over time",
+    x        = "Year",
+    y        = "Number of Tokens",
+    colour   = "Party"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold"))
+
+```
+
+This plot shows a clear trend, inaugural addresses have become significantly shorter over time.
+:::
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #1A6B3C;"}
+## 2. Preprocessing Pipeline
+
+This preprocessing pipeline transforms the raw speeches into a structured DFM (Document-Feature Matrix) by removing linguistic noise and standardising vocabulary. Through isolating root words and filtering out non-partisan "stopwords", we can ensure that the model focuses on the particular ideological markers that distinguish the two parties.
+
+This pipeline goes through 5 steps
+
+1.  *Tokenise and Clean*: Break the text into individual words while removing punctuation, numbers and symbols that don't contribute to ideological meaning. Splitting hyphens allows us to ensure that compound terminology is captured by the component words.
+2.  *Stemming*: Through stemming words are reduced to their base form, for example: 'democracy' and 'democratic' become 'democraci'. This groups related terms in order to give the model more consistent data points.
+3.  *Remove Stopwords*: Filter out common English stopwords like the, is, or at, that appear frequently but do not carry with them any ideological or thematic weight.
+4.  *Construct the DFM*: Convert the list of words into a mathematical grid where rows are speeches and columns represent word counts - this is the main format required for machine learning.
+5.  *Standardization*: Convert all text to lowercase so that the model doesn't treat "Democracy" and "democracy" as two separate words.
+
+```{r preprocess-pipeline}
+# 1. Tokenise and Clean
+
+speech_tokens <- tokens(
+  modern_corpus,
+  remove_punct   = TRUE,   
+  remove_numbers = TRUE,   
+  remove_symbols = TRUE,   
+  split_hyphens  = TRUE    
+)
+
+# 2. Stemming
+
+speech_tokens <- tokens_wordstem(speech_tokens)
+
+# 3. Remove Stopwords
+
+speech_tokens <- tokens_remove(speech_tokens, pattern = stopwords("english"))
+
+# 4. Construct the DFM
+
+dfmat <- dfm(speech_tokens)
+
+# 5. Standardization 
+
+dfmat <- dfm_tolower(dfmat)
+
+
+dfmat
+```
+
+The DFM shows that the 41 addresses are condensed into `4,565` unique word stems, this provides a high-dimensional portrait of presidential rhetoric over 160 years. With a sparsity of `87.57%`, the DFM indicates that even though the total vocabulary is vast, each individual speech utilizes a very specific subset of terms, this is ideal for identifying the unique linguistic markers of each party. Each cell records how often a word stem appears in a given speech.
+:::
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #5E2D91;"}
+## 3. Keyness Analysis
+
+Keyness analysis is a principled statistical test that identifies which word stems are most distinctively associated with each party in their inaugural addresses. Using the `textstat_keyness()` function from `quanteda.textstats` we compute a chi-squared ($\chi^{2}$) statistic for each feature, thereby measuring how significantly its frequency in the target group diverges from what we would expect if the party had no impact on word choice.
+
+By comparing group-level frequencies, keyness analysis can tell us which stems are used disproportionately by one party across all their speeches.
+
+```{r keyness-analysis}
+# Compute keyness using Democrats as the target group and Republicans as reference
+
+keyness <- textstat_keyness(dfmat,
+                             target  = docvars(dfmat, "Party") == "Democrat",
+                             measure = "chi2")
+
+# Find the top 15 Democrat-distinctive and Republican-distinctive stems
+
+top_dem <- head(keyness, 15)
+top_rep <- tail(keyness, 15)
+
+# Combine the two and label directions
+
+plot_data <- bind_rows(
+  mutate(top_dem, direction = "Democrat-distinctive"),
+  mutate(top_rep, direction = "Republican-distinctive")
+) %>%
+  mutate(feature = reorder(feature, chi2))
+
+# Plot the Keyness Analysis
+
+ggplot(plot_data, aes(x = feature, y = chi2, fill = direction)) +
+  geom_col(width = 0.75) +
+  coord_flip() +
+  facet_wrap(~ direction, scales = "free") +
+  scale_fill_manual(values = c(
+    "Democrat-distinctive"    = "#2166AC",
+    "Republican-distinctive"  = "#D6604D"
+  )) +
+  labs(
+    title    = "Keyness Analysis: Most Distinctive Word Stems by Party",
+    subtitle = "Chi-squared statistic; higher chi-squared statistic means more strongly associated with that party",
+    x        = "Word Stem",
+    y        = "Chi-squared Statistic",
+    caption  = "Based on US Presidential Inaugural Addresses, 1861–2021"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text      = element_text(face = "bold", size = 12),
+    plot.title      = element_text(face = "bold")
+  )
+
+```
+
+This keyness plot shows the substantively meaningful differences in the vocabulary used by both parties:
+
+Democrat-distinctive stems show that Democratic presidents reach for the word "democraci" more than any other term. Their rhetoric centers around collective solidarity, with words like "us", "togeth" and "journey", and time, with words like "centuri", "today" and "generat".
+
+Republican-distinctive stems are notably institutional and procedural. "law" is the strongest Republican-distinctive stem, followed by words like "congress", "enforce", "administr", "state" and "constitut" - centering their language around the formal structures of government and constitutional order.
+:::
+
+------------------------------------------------------------------------
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #C55A11;"}
+## 4. Naïve Bayes Classification
+
+**Naïve Bayes** is a generative probabilistic classifier rooted in Bayes' theorem:
+
+$$P(\text{class} \mid \text{document}) = P(\text{document} \mid \text{class}) \times \frac{P(\text{class})}{P(\text{document})}$$
+
+This makes two important assumptions: (1) the **bag-of-words assumption** states that word order doesn't matter, only the frequency of a word used matters, and (2) the **conditional independence assumption** states that given the party, words are independent of each other. Both assumptions are technically false, however, they still produce a strong performance for classification in practice - this is true particularly for short texts wherein frequency signals prove to be informative.
+
+To increase the training sample from 41 documents to a more robust dataset, one must reshape the corpus at the paragraph level. Each paragraph of each speech becomes its own document, and inherits the party label of its parent speech.
+
+```{r reshape}
+# Rebuild the DFM and reshape to the paragraph level
+
+para_corpus <- corpus_reshape(modern_corpus, to = "paragraphs", use_docvars = TRUE)
+
+para_tokens <- tokens(para_corpus,
+                      remove_punct   = TRUE,
+                      remove_numbers = TRUE,
+                      remove_symbols = TRUE,
+                      split_hyphens  = TRUE) %>%
+  tokens_wordstem() %>%
+  tokens_remove(stopwords("english"))
+
+para_dfm <- dfm(para_tokens) %>% dfm_tolower()
+
+# Check the class distribution at the paragraph level
+
+table(docvars(para_dfm, "Party"))
+
+```
+```{r class-balance-plot}
+# Create a new data frame that shows frequency and percentage distribution of speeches by political party.
+
+party_counts <- as.data.frame(table(docvars(para_dfm, "Party")))
+names(party_counts) <- c("Party", "Count")
+party_counts$Proportion <- round(party_counts$Count / sum(party_counts$Count) * 100, 1)
+
+# Create a plot to show the class distribution at the paragraph level
+ggplot(party_counts, aes(x = Party, y = Count, fill = Party)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = paste0(Count, " (", Proportion, "%)")),
+            vjust = -0.5, size = 4.5, fontface = "bold") +
+  scale_fill_manual(values = c("Democrat" = "#2166AC", "Republican" = "#D6604D")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title    = "Class Distribution at Paragraph Level",
+    subtitle = "There is a slight Republican majority that reflects the greater number of Republican presidents in this period",
+    x = NULL, y = "Number of Paragraphs"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold"))
+```
+
+Conduct a Train/Test (80/20) split to partition the data into two parts, whre one is used to learn the model parameters (training set) and the other is used to evaluate performance on unseen data (test set). 
+
+```{r train-test-split}
+set.seed(42) # for reproducibility
+
+# Define the 80/20 split ratio for training and testing
+
+n_docs  <- ndoc(para_dfm)
+n_train <- floor(0.80 * n_docs)
+
+# Shuffle indices to avoid temporal ordering bias
+
+idx_shuffled <- sample(seq_len(n_docs))
+train_idx    <- idx_shuffled[1:n_train]
+test_idx     <- idx_shuffled[(n_train + 1):n_docs]
+
+# Partition the data into training and validation sets
+
+dfm_train <- para_dfm[train_idx, ]
+dfm_test  <- para_dfm[test_idx,  ]
+
+# Fit the Multinomial Naïve Bayes
+
+nb_model <- textmodel_nb(dfm_train,
+                          y            = docvars(dfm_train, "Party"),
+                          distribution = "multinomial",
+                          smooth       = 1)  # Laplace (add-1) smoothing
+
+summary(nb_model)
+```
+An important practical consideration is that the test set may contain word stems that aren't present in the training vocabulary, using `dfm_match()` we can align the test DFM to the training vocabulary, thereby removing unseen features and padding with zeros for features in training that are absent from the test paragraph. 
+
+```{r predict}
+# Align the test DFM to the training vocabulary
+
+dfm_test_matched <- dfm_match(dfm_test, features = featnames(dfm_train))
+
+# Generate predictions
+
+predicted_party <- predict(nb_model, newdata = dfm_test_matched)
+actual_party <- docvars(dfm_test_matched, "Party")
+
+predicted_party
+actual_party
+```
+:::
+
+---
+
+::: {style="background: #F9FAFB; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #740101;"}
+## 5. Model Evaluation
+
+A confusion matrix is a 2x2 table that compares the predicted class labels against the actual labels. 
+```{r confusion-matrix}
+# Create the confusion matrix
+
+tab <- table(Predicted = predicted_party, Actual = actual_party)
+tab
+
+cfm <- confusionMatrix(tab, mode = "everything")
+cfm
+```
+To better understand this, we can visualise the classification performance. 
+
+```{r performance-plot}
+# Extract the key metrics for plotting
+
+metrics <- data.frame(
+  Metric = c("Accuracy", "Precision (D)", "Recall (D)",
+             "Precision (R)", "Recall (R)", "F1 Score"),
+  Value  = c(
+    cfm$overall["Accuracy"],
+    cfm$byClass["Pos Pred Value"],
+    cfm$byClass["Sensitivity"],
+    cfm$byClass["Neg Pred Value"],
+    cfm$byClass["Specificity"],
+    cfm$byClass["F1"]
+  )
+)
+
+# Create the plot
+
+ggplot(metrics, aes(x = reorder(Metric, Value), y = Value)) +
+  geom_col(fill = "#2166AC", alpha = 0.85, width = 0.6) +
+  geom_text(aes(label = scales::percent(Value, accuracy = 0.1)),
+            hjust = -0.1, size = 4, fontface = "bold", colour = "#7A2894") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(),
+                     limits = c(0, 1.15),
+                     expand = expansion(mult = c(0, 0))) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", colour = "grey60") +
+  labs(
+    title    = "Naïve Bayes Classification Performance",
+    x = NULL, y = "Score"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+The classifier's accuracy is 58.3%, which is slightly better than the No Information Rate of 55.7%. This No Information Rate represents the performance of a basic model that predicts "Republican" for every paragraph. However, this improvement isn't statistically significant (as p = 0.19), meaning that we can't claim with full confidence that the model is doing better than chance. The confusion matrix makes the picture concrete: the model misclassifies 75 Democrat paragraphs as Republican, and 50 Republican paragraphs as Democrat.
+
+The asymmetry between parties is noteworthy. When the model predicts Republican it is more often correct (Precision: 64.8%), but it catches a greater share of the actual Democrat paragraphs (Recall: 62.4%) — at the cost of more false positives. The F1-score of 57.0% highlights this uneven trade-off in a single number.
+
+Despite the keyness analysis highlighting clear group-level differences in partisan vocabulary, however, the classifier struggles to translate those patterns into reliable paragraph-level predictions. This gap between description and prediction is itself a meaningful finding: partisan language differences exist, however, they are too subtle and variable for a bag-of-words model to exploit reliably at the paragraph level. The three limitations identified — 160 years of linguistic drift, paragraphs that are not truly independent of each other, and only 41 speeches at the document level — are all likely contributors.
+
+Nonetheless, this project demonstrates the complete text analysis pipeline: from loading and labelling a corpus, through preprocessing and keyness analysis, to supervised classification and honest evaluation. Rather than overstating what a simple model can achieve, the analysis arrives at a result that is transparent about its own limitations — which is, ultimately, what good quantitative research looks like.
+
+:::

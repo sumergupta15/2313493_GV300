@@ -26,6 +26,8 @@ I'm **Sumer Gupta**, a student at the **University of Essex** specializing in qu
 
 -   Democratic representation and political inequality
 
+-   Quantitative text analysis and political language
+
 ------------------------------------------------------------------------
 
 ## Education
@@ -66,35 +68,45 @@ I'm **Sumer Gupta**, a student at the **University of Essex** specializing in qu
 
 **Data Manipulation**:
 
--   `tidyverse` ecosystem (`dplyr`, `tidyr`, `purrr`)
+-   `tidyverse` ecosystem (`dplyr`, `tidyr`, `purrr`) for developing functional and pipe-oriented workflows for data restructuring
 
--   `readr` for importing data
+-   `readr` for implementing efficient data ingestion methods for certain formats of delimited data and large datasets.
 
--   `stringr` for manipulating strings
+-   `stringr` for manipulating strings and carrying out complex pattern matches for data cleaning
 
 **Statistical Analysis**:
 
--   Base R statistical functions
+-   Base R statistical functions for hypothesis testing and distribution analysis
 
--   `lm()` and `glm()` for regression modeling
+-   `lm()` and `glm()` frameworks for linear and logistic multivariate modeling
 
--   Causal inference frameworks
+-   Causal inference frameworks to estimate effects within observational and experimental data
 
 **Data Visualization**:
 
--   `ggplot2` (advanced)
+-   `ggplot2` to construct layered graphics with custom scales and publication-ready aesthetic mappings
 
--   `ggiraph` for interactive graphs
+-   `ggiraph` for interactive HTML graphs
 
--   Custom themes and styling
+-   Custom themes and styling to ensure visual consistency across research outputs
 
 **Reproducible Research**:
 
--   `knitr` for dynamic report generation
+-   `knitr` for dynamic, data-driven report generation
 
--   `distill` for web publishing
+-   `distill` for building technical websites optimized for scientific communication
 
--   `postcards` for portfolio pages
+-   `postcards` for creating minimalist landing pages for professional portfolios and CVs
+
+**Text Analysis:**
+
+-   `quanteda` for corpus construction, tokenisation, and document-feature matrices
+
+-   `readtext` for loading raw text files into R
+
+-   `quanteda.textmodels` for Naïve Bayes and other text classifiers
+
+-   `quanteda.textstats` for corpus statistics, keyness analysis and similarity measures
 
 ------------------------------------------------------------------------
 
@@ -135,6 +147,22 @@ Throughout my coursework, I've managed to develop proficiency in:
 -   Grammar of graphics principles
 
 -   Publication-quality graphs and figures
+
+**Quantitative Text Analysis**
+
+-   Corpus construction and preprocessing
+
+-   Bag-of-words representation
+
+-   Document-Feature Matrices
+
+-   TF-IDF weighting
+
+-   Keyness Statistics
+
+-   Supervised classification with Naïve Bayes
+
+-   Preprocessing sensitivity analysis
 
 ------------------------------------------------------------------------
 
